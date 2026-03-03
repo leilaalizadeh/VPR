@@ -18,17 +18,18 @@ def adaptive_rerank_preds(pred_retrieval: np.ndarray, pred_reranked: np.ndarray,
       if inliers_top1 < threshold -> use reranked list
       else -> use retrieval list
     """
-    use_rerank = inliers_top1 < threshold
-    out = pred_retrieval.copy()
-    out[use_rerank] = pred_reranked[use_rerank]
+    use_rerank = inliers_top1 < threshold   # True → query is “hard” → rerank
+                                            # False → query is “easy” → keep retrieval
+    out = pred_retrieval.copy()             # Start with the cheap output (retrieval)
+    out[use_rerank] = pred_reranked[use_rerank] # For the subset of hard queries, replace the whole top-K list with the reranked one
     return out.astype(int)
 # hard: if inliers < t then rerank
 
-def adaptive_rerank_top1(predictions_2d: np.ndarray, reranked_top1: np.ndarray, inliers_top1: np.ndarray, threshold: float) -> np.ndarray:
-    top1_retrieval = predictions_2d[:, 0].astype(int)
-    use_rerank = inliers_top1 < threshold
-    out = np.where(use_rerank, reranked_top1, top1_retrieval)
-    return out.astype(int)
+# def adaptive_rerank_top1(predictions_2d: np.ndarray, reranked_top1: np.ndarray, inliers_top1: np.ndarray, threshold: float) -> np.ndarray:
+#     top1_retrieval = predictions_2d[:, 0].astype(int) # Extracts the retrieval top-1 id for each query.
+#     use_rerank = inliers_top1 < threshold
+#     out = np.where(use_rerank, reranked_top1, top1_retrieval)
+#     return out.astype(int)
 
 
 def sweep_thresholds(pred_retrieval: np.ndarray, pred_reranked: np.ndarray, positives_per_query: list, inliers_top1: np.ndarray, thresholds: np.ndarray):
@@ -37,13 +38,13 @@ def sweep_thresholds(pred_retrieval: np.ndarray, pred_reranked: np.ndarray, posi
 
     for t in thresholds:
         preds_adapt = adaptive_rerank_preds(pred_retrieval, pred_reranked, inliers_top1, t)
-
+        # Compute Recall@N from the adaptive predictions
         r1_list.append(ld.recall_at_n(preds_adapt, positives_per_query, 1))
         r5_list.append(ld.recall_at_n(preds_adapt, positives_per_query, 5))
         r10_list.append(ld.recall_at_n(preds_adapt, positives_per_query, 10))
         r20_list.append(ld.recall_at_n(preds_adapt, positives_per_query, 20))
 
-        frac_list.append(float(np.mean(inliers_top1 < t)))
+        frac_list.append(float(np.mean(inliers_top1 < t)))  # # Compute Recall@N from the adaptive predictions
 
     return (np.array(r1_list), np.array(r5_list), np.array(r10_list), np.array(r20_list),
             np.array(frac_list))
@@ -57,7 +58,7 @@ def save_fig(plots_dir, name):
     if plots_dir is None:
         plt.show()
     else:
-        os. makedirs(plots_dir, exist_ok=True)
+        os.makedirs(plots_dir, exist_ok=True)
         plt.savefig(os.path.join(plots_dir, name), dpi=200, bbox_inches="tight")
         plt.close()
 
@@ -76,12 +77,10 @@ def plot_inliers_hist(plots_dir: str,inliers_top1: np.ndarray, correct: np.ndarr
     save_fig(plots_dir, f"{title}_hist.png")
 
 
-def plot_sweep(plots_dir: str,
-               thresholds: np.ndarray,
-               r1: np.ndarray,
-               frac_reranked: np.ndarray,
-               title_prefix: str):
+def plot_sweep(plots_dir: str, thresholds: np.ndarray, r1: np.ndarray, frac_reranked: np.ndarray, title_prefix: str):
     plt.figure()
+    print(thresholds)
+    print(r1)
     plt.plot(thresholds, r1)
     plt.xlabel("inliers threshold t")
     plt.ylabel("Adaptive R@1")
@@ -113,8 +112,6 @@ def plot_time_tradeoff(plots_dir:str, frac_reranked: np.ndarray, t_rerank: float
     save_fig(plots_dir,f"{title}_time_savings.png")
 
 def plot_accuracy_cost(frac_reranked, r1, title, plots_dir=None, prefix="run"):
-    import os
-    import matplotlib.pyplot as plt
 
     plt.figure()
     plt.plot(100*frac_reranked, 100*r1)
@@ -135,7 +132,7 @@ def run_adaptive(z_path: str, matches_dir: str, dataset_name: str, t_rerank: flo
     positives = z["positives_per_query"]
 
     num_q = predictions.shape[0]
-    matches = ld.load_matches_dir(matches_dir, expected_num_queries=num_q)
+    matches = ld.load_matches_dir(matches_dir, expected_num_queries=num_q) #one per query 
 
     if len(matches) != predictions.shape[0]:
         raise ValueError(
@@ -143,8 +140,8 @@ def run_adaptive(z_path: str, matches_dir: str, dataset_name: str, t_rerank: flo
             f"Ensure matches_dir has exactly one file per query in correct order."
         )
 
-    correct = ld.correct_at_1(predictions, positives)  
-    inliers_top1 = ld.get_inliers_top1(matches)
+    correct = ld.correct_at_1(predictions, positives)   # retrieval top-1 correct or not
+    inliers_top1 = ld.get_inliers_top1(matches) 
 
     pred_retrieval = predictions.astype(int)                 
     pred_reranked  = ld.reranked_preds_from_inliers(pred_retrieval, matches)  
@@ -160,7 +157,7 @@ def run_adaptive(z_path: str, matches_dir: str, dataset_name: str, t_rerank: flo
     r10_reranked = ld.recall_at_n(pred_reranked, positives, 10)
     r20_reranked = ld.recall_at_n(pred_reranked, positives, 20)
 
-    if fixed_threshold is not None:
+    if fixed_threshold is not None: #test datasets
         preds_adapt = adaptive_rerank_preds(pred_retrieval, pred_reranked, inliers_top1, fixed_threshold)
 
         r1_adapt  = ld.recall_at_n(preds_adapt, positives, 1)
@@ -202,9 +199,9 @@ def run_adaptive(z_path: str, matches_dir: str, dataset_name: str, t_rerank: flo
     plot_sweep(plots_dir,thresholds, r1_adapt, frac_reranked, title_prefix=dataset_name)
     plot_accuracy_cost(frac_reranked, r1_adapt, f"{dataset_name} — Accuracy–cost trade-off", plots_dir=plots_dir, prefix=dataset_name)
 
-    best_r1 = np.max(r1_adapt)
-    cands = np.where(np.isclose(r1_adapt, best_r1, atol=1e-12))[0]
-    best_idx = int(cands[np.argmin(frac_reranked[cands])])
+    best_r1 = np.max(r1_adapt) # Find the maximum achievable R@1.
+    cands = np.where(np.isclose(r1_adapt, best_r1, atol=1e-12))[0] # Find all thresholds that achieve this same best R@1 (ties)
+    best_idx = int(cands[np.argmin(frac_reranked[cands])]) # Among them, pick the one with minimum rerank fraction (cheapest).
 
    
     best_t = float(thresholds[best_idx])

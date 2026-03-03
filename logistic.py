@@ -21,25 +21,26 @@ def build_features_and_data(z_path: str, matches_dir: str):
 
     predictions = ld.to_numpy_2d(z["predictions"]).astype(int) 
     positives = z["positives_per_query"]
-
     distances = ld.to_numpy_2d(z["distances"]).astype(float)
 
     Q = predictions.shape[0]
-    matches = ld.load_matches_dir(matches_dir, expected_num_queries=Q)
+    matches = ld.load_matches_dir(matches_dir, expected_num_queries=Q) # load inliers for each query 
 
     # is retrieval top-1 wrong?
-    correct = ld.correct_at_1(predictions, positives)
-    y = (~correct).astype(int)  # 1 = wrong, 0 = correct
+    correct = ld.correct_at_1(predictions, positives) # if top-1 retrieval is correct
+    y = (~correct).astype(int)  # 1 = wrong, 0 = correct y[q] = 1 if top-1 retrieval is wrong → this is what logistic learns to predict.
 
-    # feature 1: inliers(top1)
+    # feature 1: inliers(top1) For each query: take inliers between query and top-1 retrieved candidate.
     inliers_top1 = np.array([float(matches[q][0]["num_inliers"]) for q in range(Q)], dtype=float)
 
     # feature 2: distance margin = d2 - d1 
+    # f top-1 is much better than top-2, then d2 - d1 is large ⇒ retrieval confident
+    # If top-1 and top-2 are close, margin small ⇒ ambiguous ⇒ more likely wrong
     d1 = distances[:, 0]
     d2 = distances[:, 1]
     margin = (d2 - d1).astype(float)
  
-    X = np.stack([inliers_top1, margin], axis=1)
+    X = np.stack([inliers_top1, margin], axis=1) # column 0: inliers_top1, column 1: margin
 
     # retrieval list
     pred_retrieval = predictions
@@ -56,7 +57,7 @@ def build_features_and_data(z_path: str, matches_dir: str):
 def adaptive_preds_from_prob(pred_retrieval: np.ndarray, pred_reranked: np.ndarray, p_wrong: np.ndarray, p0: float) -> np.ndarray:
     """Use reranked list if p_wrong > p0 else keep retrieval list."""
     out = pred_retrieval.copy()
-    use = (p_wrong > p0)
+    use = (p_wrong > p0) 
     out[use] = pred_reranked[use]
     return out.astype(int)
 
@@ -90,6 +91,7 @@ def choose_best_tradeoff(cutoffs: np.ndarray, r1: np.ndarray, frac: np.ndarray, 
     # pick minimal rerank fraction
     idx = int(np.argmin(frac[ok]))
     return cutoffs[ok][idx], r1[ok][idx], frac[ok][idx]
+    # Among all “almost-best” R@1 solutions, choose the one that reranks the least.
 
 
 # ----------------------------
@@ -230,7 +232,7 @@ def main(args):
     y_tr = np.concatenate([y_tr1, y_tr2], axis=0)
     model = Pipeline([
         ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced"))
+        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced")) # Balanced weights help because wrong queries may be minority or majority depending on dataset
     ])
     model.fit(X_tr, y_tr)
 
